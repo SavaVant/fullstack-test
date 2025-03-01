@@ -6,6 +6,10 @@ import { CreateProductDto } from '../dto/create-product.dto';
 import { UpdateProductDto } from '../dto/update-product.dto';
 import { FileUploadService } from './file-upload.service';
 import { IProductService } from '../interfaces/product.service.interface';
+import {
+  PRODUCTS_DEFAULT_LIMIT,
+  PRODUCTS_DEFAULT_PAGE,
+} from '../constants/product.constants';
 
 @Injectable()
 export class ProductsService implements IProductService {
@@ -13,8 +17,8 @@ export class ProductsService implements IProductService {
 
   constructor(
     @InjectRepository(Product)
-    private productsRepository: Repository<Product>,
-    private fileUploadService: FileUploadService,
+    private readonly productRepository: Repository<Product>,
+    private readonly fileUploadService: FileUploadService,
   ) {}
 
   private generateArticleNumber(): string {
@@ -25,11 +29,11 @@ export class ProductsService implements IProductService {
 
   async create(createProductDto: CreateProductDto): Promise<Product> {
     try {
-      const product = this.productsRepository.create({
+      const product = this.productRepository.create({
         ...createProductDto,
         articleNumber: this.generateArticleNumber(),
       });
-      return await this.productsRepository.save(product);
+      return await this.productRepository.save(product);
     } catch (error) {
       this.logger.error(`Failed to create product: ${error.message}`);
       throw error;
@@ -37,48 +41,39 @@ export class ProductsService implements IProductService {
   }
 
   async findAll(
-    page = 1,
-    limit = 10,
-    sort?: string,
-    order?: 'ASC' | 'DESC',
-    filter?: any,
+    page = PRODUCTS_DEFAULT_PAGE,
+    limit = PRODUCTS_DEFAULT_LIMIT,
+    sort = 'id',
+    order: 'ASC' | 'DESC' = 'DESC',
+    filter?: Record<string, any>,
   ) {
     try {
-      const query = this.productsRepository.createQueryBuilder('product');
-      let hasWhereCondition = false;
+      const skip = (page - 1) * limit;
+      const query = this.productRepository.createQueryBuilder('product');
 
-      if (filter?.name) {
-        const filterNameTrim = filter.name;
-        query.where('LOWER(product.name) LIKE LOWER(:name)', {
-          name: `%${filter?.name?.trim()}%`,
-        });
-        hasWhereCondition = true;
-      }
-
-      if (filter?.priceMin !== undefined) {
-        const condition = 'product.price >= :priceMin';
-        if (hasWhereCondition) {
-          query.andWhere(condition, { priceMin: Number(filter.priceMin) });
-        } else {
-          query.where(condition, { priceMin: Number(filter.priceMin) });
+      if (filter) {
+        if (filter.name) {
+          query.andWhere('LOWER(product.name) LIKE LOWER(:name)', {
+            name: `%${filter.name}%`,
+          });
         }
-        hasWhereCondition = true;
-      }
-
-      if (filter?.priceMax !== undefined) {
-        const condition = 'product.price <= :priceMax';
-        if (hasWhereCondition) {
-          query.andWhere(condition, { priceMin: Number(filter.priceMin) });
-        } else {
-          query.where(condition, { priceMin: Number(filter.priceMin) });
+        
+        if (filter.priceMin !== undefined) {
+          query.andWhere('product.price >= :priceMin', {
+            priceMin: filter.priceMin,
+          });
+        }
+        
+        if (filter.priceMax !== undefined) {
+          query.andWhere('product.price <= :priceMax', {
+            priceMax: filter.priceMax,
+          });
         }
       }
 
-      if (sort) {
-        query.orderBy(`product.${sort}`, order || 'ASC');
-      }
-
-      query.skip((page - 1) * limit).take(limit);
+      query.orderBy(`product.${sort}`, order);
+      query.skip(skip);
+      query.take(limit);
 
       const [items, total] = await query.getManyAndCount();
 
@@ -96,7 +91,7 @@ export class ProductsService implements IProductService {
 
   async findOne(id: number): Promise<Product> {
     try {
-      const product = await this.productsRepository.findOne({ where: { id } });
+      const product = await this.productRepository.findOne({ where: { id } });
       if (!product) {
         throw new NotFoundException(`Product with ID ${id} not found`);
       }
@@ -114,7 +109,7 @@ export class ProductsService implements IProductService {
     try {
       const product = await this.findOne(id);
       Object.assign(product, updateProductDto);
-      return await this.productsRepository.save(product);
+      return await this.productRepository.save(product);
     } catch (error) {
       this.logger.error(`Failed to update product: ${error.message}`);
       throw error;
@@ -123,7 +118,7 @@ export class ProductsService implements IProductService {
 
   async remove(id: number): Promise<void> {
     try {
-      const result = await this.productsRepository.delete(id);
+      const result = await this.productRepository.delete(id);
       if (result.affected === 0) {
         throw new NotFoundException(`Product with ID ${id} not found`);
       }
@@ -144,7 +139,7 @@ export class ProductsService implements IProductService {
       const fileName = this.fileUploadService.saveFile(file);
 
       product.imageUrl = fileName;
-      return await this.productsRepository.save(product);
+      return await this.productRepository.save(product);
     } catch (error) {
       this.logger.error(`Failed to upload image: ${error.message}`);
       throw error;
@@ -158,7 +153,7 @@ export class ProductsService implements IProductService {
       if (product.imageUrl) {
         await this.fileUploadService.deleteFile(product.imageUrl);
         product.imageUrl = null;
-        return await this.productsRepository.save(product);
+        return await this.productRepository.save(product);
       }
 
       return product;
@@ -168,3 +163,4 @@ export class ProductsService implements IProductService {
     }
   }
 }
+
